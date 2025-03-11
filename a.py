@@ -38,10 +38,9 @@ while cap.isOpened():
     ###################################
     ##### PREPROCESSING OF IMAGE ######
     ###################################
-    
-    roi = frame[0:350, 0:500]
+     
     # Convert image to grayscale
-    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     # Blurring of image
     blur = cv2.medianBlur(gray,5)
     blurred = cv2.GaussianBlur(blur, (7,7), 1.5, 1.5, cv2.BORDER_REPLICATE)
@@ -53,7 +52,7 @@ while cap.isOpened():
     
     # Find Contours
     _contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_TC89_KCOS)
-    _drawing = np.copy(roi)
+    _drawing = np.copy(frame)
     
     
     _contours_filtered = []
