@@ -92,6 +92,8 @@ print(center_list)
 cap.release()
 cv2.destroyAllWindows()
 
+print(len(center_list))
+
 # ========= Time Series Imaging (TSI) =========
 
 def normalize_ts(ts):
@@ -131,19 +133,57 @@ def compute_gaf(ts, method):
         raise ValueError("Method should be either 'summation' or 'difference'")
     return gaf_image
  
- 
-sorted_frames = sorted(center_list.keys()) 
-pupil_x_series = [center_list[frame][0] for frame in sorted_frames]
- 
-gaf_summation = compute_gaf(pupil_x_series, method='summation')
-gaf_difference = compute_gaf(pupil_x_series, method='difference') 
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.interpolate import interp1d
+from scipy.signal import savgol_filter  # Import Savitzky-Golay filter
+
+import numpy as np
+import os
+import matplotlib.pyplot as plt
+from scipy.interpolate import interp1d
+from scipy.signal import savgol_filter
+from pyts.image import GramianAngularField
+
+def compute_gaf(data, method):
+    gaf_transformer = GramianAngularField(method=method)
+    return gaf_transformer.fit_transform(data.reshape(1, -1))[0]
+
+sorted_frames = sorted(center_list.keys())  
+pupil_x_series = np.array([center_list[frame][0] for frame in sorted_frames])
+
+q1 = np.percentile(pupil_x_series, 25)
+q3 = np.percentile(pupil_x_series, 75)
+iqr = q3 - q1
+lower_bound = q1 - 1.5 * iqr
+upper_bound = q3 + 1.5 * iqr
+
+outlier_mask = (pupil_x_series < lower_bound) | (pupil_x_series > upper_bound)
+
+pupil_x_cleaned = np.copy(pupil_x_series).astype(float)
+pupil_x_cleaned[outlier_mask] = np.nan
+
+valid_indices = np.where(~outlier_mask)[0]
+valid_values = pupil_x_cleaned[valid_indices]
+
+interp_func = interp1d(valid_indices, valid_values, kind='cubic', fill_value='extrapolate')
+pupil_x_cleaned[outlier_mask] = interp_func(np.where(outlier_mask)[0])
+
+pupil_x_smoothed = savgol_filter(pupil_x_cleaned, window_length=51, polyorder=3)
+
+gaf_summation = compute_gaf(pupil_x_smoothed, method='summation')
+gaf_difference = compute_gaf(pupil_x_smoothed, method='difference')
+
 plt.figure(figsize=(14, 8))
 
 plt.subplot(2, 2, 1)
-plt.plot(sorted_frames, pupil_x_series, marker='o')
-plt.title("Pupil X-coordinate Time Series")
+plt.scatter(sorted_frames, pupil_x_series, label="Original Data (with Outliers)", s=10, alpha=0.5)
+plt.scatter(sorted_frames, pupil_x_cleaned, label="Cleaned Data (Interpolated)", s=10, color='red')
+plt.plot(sorted_frames, pupil_x_smoothed, label="Smoothed Data (Savitzky-Golay)", color='green', linewidth=2)
 plt.xlabel("Frame Number")
 plt.ylabel("X Coordinate")
+plt.title("Pupil X-coordinate Time Series (Outliers Interpolated & Smoothed)")
+plt.legend()
 
 plt.subplot(2, 2, 2)
 plt.imshow(gaf_summation, cmap='rainbow', origin='lower')
@@ -157,3 +197,30 @@ plt.colorbar()
 
 plt.tight_layout()
 plt.show()
+
+def func(window_size, pupil_x_smoothed, sorted_frames, save_dir="GADF_GASF_Images"):
+    os.makedirs(save_dir, exist_ok=True)
+    num_partitions = len(sorted_frames) // window_size
+
+    gaf_transformer = GramianAngularField(method="summation")
+    gadf_transformer = GramianAngularField(method="difference")
+    
+    for i in range(num_partitions):
+        start_idx = i * window_size
+        end_idx = start_idx + window_size
+        segment = pupil_x_smoothed[start_idx:end_idx]
+
+        if len(segment) < window_size:
+            continue
+
+        segment = segment.reshape(1, -1)
+
+        gasf_image = gaf_transformer.fit_transform(segment)[0]
+        gadf_image = gadf_transformer.fit_transform(segment)[0]
+
+        plt.imsave(os.path.join(save_dir, f"gasf_{i}.png"), gasf_image, cmap="rainbow")
+        plt.imsave(os.path.join(save_dir, f"gadf_{i}.png"), gadf_image, cmap="rainbow")
+    
+    print(f"Saved {num_partitions * 2} images in '{save_dir}'.")
+
+# func(10, pupil_x_smoothed, sorted_frames)
